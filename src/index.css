@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Rubik', system-ui, -apple-system, sans-serif;
+    color: #1c1c15;
+    background-color: #fdf9ee;
+  }
+  
+  .font-headline {
+    font-family: 'Bricolage Grotesque', sans-serif;
+  }
+
+  .font-body {
+    font-family: 'Rubik', sans-serif;
+  }
+
+  .font-arcade {
+    font-family: 'Bricolage Grotesque', cursive, sans-serif;
+  }
+
+  .font-bouncy {
+    font-family: 'Rubik', sans-serif;
+  }
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Candy 3D arcade tactile buttons */
+.arcade-btn {
+  transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.arcade-btn:active {
+  transform: translateY(3px);
+}
