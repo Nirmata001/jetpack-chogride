@@ -14,6 +14,11 @@ export class GameRenderer {
   private cachedFloorGrad: CanvasGradient | null = null;
   private cachedFloorGlow: CanvasGradient | null = null;
   private cachedBeamGrad: CanvasGradient | null = null;
+  private cachedChogTorsoGrad: CanvasGradient | null = null;
+  private cachedChogQuillGrad: CanvasGradient | null = null;
+  private cachedChogFaceGrad: CanvasGradient | null = null;
+  private cachedCanGrad: CanvasGradient | null = null;
+  private cachedZapperBeamGrad: CanvasGradient | null = null;
 
   constructor() {}
 
@@ -2684,12 +2689,14 @@ export class GameRenderer {
     ctx.fill();
 
     // Canister 2 Body (Main front canister with chrome metallic shine)
-    const canGrad = ctx.createLinearGradient(jetpackX, jetpackY, jetpackX + jetpackW, jetpackY);
-    canGrad.addColorStop(0, '#64748b');
-    canGrad.addColorStop(0.25, '#f8fafc'); // Specular chrome glint
-    canGrad.addColorStop(0.65, '#cbd5e1');
-    canGrad.addColorStop(1, '#475569');
-    ctx.fillStyle = canGrad;
+    if (!this.cachedCanGrad) {
+      this.cachedCanGrad = ctx.createLinearGradient(jetpackX, jetpackY, jetpackX + jetpackW, jetpackY);
+      this.cachedCanGrad.addColorStop(0, '#64748b');
+      this.cachedCanGrad.addColorStop(0.25, '#f8fafc'); // Specular chrome glint
+      this.cachedCanGrad.addColorStop(0.65, '#cbd5e1');
+      this.cachedCanGrad.addColorStop(1, '#475569');
+    }
+    ctx.fillStyle = this.cachedCanGrad;
     ctx.beginPath();
     ctx.roundRect(jetpackX, jetpackY, jetpackW, jetpackH, 3.5);
     ctx.fill();
@@ -2869,11 +2876,13 @@ export class GameRenderer {
     // LAYER 4: PURPLE ONESIE TORSO & MAGENTA COLLAR
     // ------------------------------------
     ctx.save();
-    const torsoGrad = ctx.createLinearGradient(-8, -4, 8, 12);
-    torsoGrad.addColorStop(0, '#7c3aed');
-    torsoGrad.addColorStop(0.5, '#6d28d9');
-    torsoGrad.addColorStop(1, '#4c1d95');
-    ctx.fillStyle = torsoGrad;
+    if (!this.cachedChogTorsoGrad) {
+      this.cachedChogTorsoGrad = ctx.createLinearGradient(-8, -4, 8, 12);
+      this.cachedChogTorsoGrad.addColorStop(0, '#7c3aed');
+      this.cachedChogTorsoGrad.addColorStop(0.5, '#6d28d9');
+      this.cachedChogTorsoGrad.addColorStop(1, '#4c1d95');
+    }
+    ctx.fillStyle = this.cachedChogTorsoGrad;
     ctx.beginPath();
     ctx.ellipse(0, 3, 9, 10, 0.1, 0, Math.PI * 2);
     ctx.fill();
@@ -2910,12 +2919,14 @@ export class GameRenderer {
     ctx.fill();
 
     // 5B. Main 5-Tier Sweeping Quills with Radial/Linear Gradient
-    const quillGrad = ctx.createLinearGradient(-26, -26, 8, 4);
-    quillGrad.addColorStop(0, '#581c87'); // Deep back shadow
-    quillGrad.addColorStop(0.35, '#6d28d9');
-    quillGrad.addColorStop(0.7, '#7c3aed'); // Rich vibrant purple
-    quillGrad.addColorStop(1, '#a855f7');  // Front crest highlight
-    ctx.fillStyle = quillGrad;
+    if (!this.cachedChogQuillGrad) {
+      this.cachedChogQuillGrad = ctx.createLinearGradient(-26, -26, 8, 4);
+      this.cachedChogQuillGrad.addColorStop(0, '#581c87'); // Deep back shadow
+      this.cachedChogQuillGrad.addColorStop(0.35, '#6d28d9');
+      this.cachedChogQuillGrad.addColorStop(0.7, '#7c3aed'); // Rich vibrant purple
+      this.cachedChogQuillGrad.addColorStop(1, '#a855f7');  // Front crest highlight
+    }
+    ctx.fillStyle = this.cachedChogQuillGrad;
 
     ctx.beginPath();
     ctx.moveTo(8, -19); // Forehead hairline
@@ -2993,11 +3004,13 @@ export class GameRenderer {
     // ------------------------------------
     ctx.save();
     // Beautiful Cartoon Profile Face Path (Forehead, tiny nose bump, chubby cheek & chin)
-    const faceGrad = ctx.createLinearGradient(0, -20, 12, -4);
-    faceGrad.addColorStop(0, '#fff1e6');
-    faceGrad.addColorStop(0.6, '#fed7aa');
-    faceGrad.addColorStop(1, '#fde0c0');
-    ctx.fillStyle = faceGrad;
+    if (!this.cachedChogFaceGrad) {
+      this.cachedChogFaceGrad = ctx.createLinearGradient(0, -20, 12, -4);
+      this.cachedChogFaceGrad.addColorStop(0, '#fff1e6');
+      this.cachedChogFaceGrad.addColorStop(0.6, '#fed7aa');
+      this.cachedChogFaceGrad.addColorStop(1, '#fde0c0');
+    }
+    ctx.fillStyle = this.cachedChogFaceGrad;
 
     ctx.beginPath();
     ctx.moveTo(4, -19);                      // Top forehead
@@ -3171,12 +3184,13 @@ export class GameRenderer {
     const halfLen = obs.length / 2;
 
     const flicker = Math.sin(animTime * 40 + obs.id) * 3;
-    const beamGrad = ctx.createLinearGradient(0, -9, 0, 9);
-    beamGrad.addColorStop(0, 'rgba(245, 158, 11, 0.25)');
-    beamGrad.addColorStop(0.5, 'rgba(251, 191, 36, 0.95)');
-    beamGrad.addColorStop(1, 'rgba(239, 68, 68, 0.35)');
-
-    ctx.fillStyle = beamGrad;
+    if (!this.cachedZapperBeamGrad) {
+      this.cachedZapperBeamGrad = ctx.createLinearGradient(0, -9, 0, 9);
+      this.cachedZapperBeamGrad.addColorStop(0, 'rgba(245, 158, 11, 0.25)');
+      this.cachedZapperBeamGrad.addColorStop(0.5, 'rgba(251, 191, 36, 0.95)');
+      this.cachedZapperBeamGrad.addColorStop(1, 'rgba(239, 68, 68, 0.35)');
+    }
+    ctx.fillStyle = this.cachedZapperBeamGrad;
     ctx.fillRect(-halfLen + 10, -6 - flicker * 0.4, obs.length - 20, 12 + flicker * 0.8);
 
     // Outer electric amber aura

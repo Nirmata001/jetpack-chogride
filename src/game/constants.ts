@@ -18,8 +18,8 @@ export const DEFAULT_PHYSICS: PhysicsConfig = {
   jetpackThrust: 2600,       // Upward thrust acceleration
   terminalVelocityFall: 650, // Max descent speed
   terminalVelocityClimb: 580,// Max ascent speed
-  baseScrollSpeed: 380,      // Starting horizontal scroll speed
-  scrollAcceleration: 2.2,   // Speed scaling factor as distance climbs
+  baseScrollSpeed: 290,      // Comfortable, responsive starting horizontal scroll speed
+  scrollAcceleration: 0.15,  // Very gentle speed scaling factor over long distance
   hitboxMarginPercent: 0.16, // Inset bounding box margin for fair play
 };
 

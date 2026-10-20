@@ -78,6 +78,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // High-performance HUD direct DOM refs (prevents 60 FPS React re-render thrashing)
   const hudDistanceRef = useRef<HTMLSpanElement | null>(null);
   const hudCoinsRef = useRef<HTMLSpanElement | null>(null);
+  const lastDistRef = useRef<number>(-1);
+  const lastCoinsRef = useRef<number>(-1);
   const flightDotRef = useRef<HTMLSpanElement | null>(null);
   const flightTextRef = useRef<HTMLSpanElement | null>(null);
 
@@ -228,6 +230,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'KeyM') {
+        e.preventDefault();
+        handleToggleMute();
+        return;
+      }
+
       if (gameState === 'READY') {
         if (e.code === 'KeyF') {
           handleToggleFullscreen();
@@ -349,15 +357,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           e.particleSystem.emitDust(e.playerX + 16, e.playerY + 50);
         }
 
-        // Advance endless scroll distance
-        e.scrollSpeed += config.scrollAcceleration * dt;
+        // Advance endless scroll distance gradually and safely capped (max 1.35x base speed)
+        e.scrollSpeed = Math.min(config.baseScrollSpeed * 1.35, e.scrollSpeed + config.scrollAcceleration * dt);
         e.distanceMeters += (e.scrollSpeed * dt) / 50;
 
-        // Update obstacles & missiles
+        // Update obstacles & missiles with synchronized world scrollSpeed
         e.obstacleManager.update(
           dt,
           e.distanceMeters,
-          config.baseScrollSpeed,
+          e.scrollSpeed,
           e.playerY,
           () => sound.playWarningAlert(),
           () => sound.playMissileWhoosh()
@@ -375,7 +383,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // Collision detection against obstacles
         for (const obs of e.obstacleManager.obstacles) {
           if (checkAABB(playerFairHitbox, obs.hitbox)) {
-            sound.playHitZap();
+            if (obs.type === 'missile') {
+              sound.playExplosion();
+            } else {
+              sound.playElectricZap();
+            }
             sound.stopJetpack();
             e.movementState = 'DYING';
             e.particleSystem.emitExplosion(e.playerX + 22, e.playerY + 26);
@@ -401,12 +413,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           }
         }
 
-        // High-Performance Direct DOM HUD Update (Zero React re-render stalls during flight)
-        if (hudDistanceRef.current) {
-          hudDistanceRef.current.textContent = `${Math.floor(e.distanceMeters)}m`;
+        // High-Performance Dirty-Checked Direct DOM HUD Update (Zero React re-render stalls, no layout thrashing)
+        const distInt = Math.floor(e.distanceMeters);
+        if (distInt !== lastDistRef.current) {
+          lastDistRef.current = distInt;
+          if (hudDistanceRef.current) {
+            hudDistanceRef.current.textContent = `${distInt}m`;
+          }
         }
-        if (hudCoinsRef.current) {
-          hudCoinsRef.current.textContent = `${e.coinsCollected}`;
+        if (e.coinsCollected !== lastCoinsRef.current) {
+          lastCoinsRef.current = e.coinsCollected;
+          if (hudCoinsRef.current) {
+            hudCoinsRef.current.textContent = `${e.coinsCollected}`;
+          }
         }
 
         // Update particles
@@ -683,16 +702,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
             />
 
+            {/* Title Screen Top Bar: Quick Sound & Fullscreen Controls */}
+            <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleMute();
+                }}
+                className="arcade-btn flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 shadow-lg cursor-pointer backdrop-blur-xs font-arcade text-xs tracking-wider"
+                title={isMuted ? 'Turn Sound ON (M)' : 'Turn Sound OFF (M)'}
+              >
+                {isMuted ? (
+                  <>
+                    <VolumeX className="w-4 h-4 text-rose-400" />
+                    <span className="font-bold text-rose-400">SOUND: MUTED</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span className="font-bold text-amber-300">SOUND: ON</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Subtle atmospheric vignette gradient at bottom for maximum legibility */}
             <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none" />
 
             {/* Bottom Call-To-Action: "PRESS ANY BUTTON TO START" */}
             <div className="relative z-40 mb-12 sm:mb-16 flex flex-col items-center text-center px-4">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleStartGame();
-                }}
+                onClick={handleStartGame}
                 className="arcade-btn group px-8 py-4 sm:px-14 sm:py-5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-arcade font-black text-lg sm:text-2xl md:text-3xl tracking-widest border-3 border-amber-200 shadow-[0_0_40px_rgba(245,158,11,0.7)] cursor-pointer transform hover:scale-105 active:scale-95 transition-all duration-150 animate-pulse flex items-center gap-3.5"
               >
                 <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />

@@ -7,11 +7,35 @@ import { CharacterDef, Particle, ParticleType } from '../types/game';
 
 export class ParticleSystem {
   public particles: Particle[] = [];
+  private pool: Particle[] = [];
   private shockRingTimer: number = 0;
   private contrailTimer: number = 0;
   private lastNozzleX: number = 0;
   private lastNozzleY: number = 0;
   private hasLastNozzle: boolean = false;
+
+  private spawn(p: Particle) {
+    if (this.particles.length >= 65) return;
+    const recycled = this.pool.pop();
+    if (recycled) {
+      recycled.x = p.x;
+      recycled.y = p.y;
+      recycled.vx = p.vx;
+      recycled.vy = p.vy;
+      recycled.life = p.life;
+      recycled.maxLife = p.maxLife;
+      recycled.size = p.size;
+      recycled.color = p.color;
+      recycled.secondaryColor = p.secondaryColor;
+      recycled.type = p.type;
+      recycled.drag = p.drag;
+      recycled.growthRate = p.growthRate;
+      recycled.buoyancy = p.buoyancy;
+      this.particles.push(recycled);
+    } else {
+      this.particles.push(p);
+    }
+  }
 
   /**
    * Main Exhaust Trail Engine for Flying Characters
@@ -82,7 +106,7 @@ export class ParticleSystem {
         const flameVx = -scrollSpeed * 0.35 - 120 + flameSpreadX;
         const flameVy = 110 + Math.random() * 100 + flameSpreadY;
 
-        this.particles.push({
+        this.spawn({
           x: originX,
           y: originY,
           vx: flameVx,
@@ -102,7 +126,7 @@ export class ParticleSystem {
         const smokeVx = -scrollSpeed * 0.45 - 90 + smokeSpread;
         const smokeVy = 60 + Math.random() * 60;
 
-        this.particles.push({
+        this.spawn({
           x: originX - 3,
           y: originY + 2,
           vx: smokeVx,
@@ -121,7 +145,7 @@ export class ParticleSystem {
         if (Math.random() < 0.55) {
           const sparkAngle = Math.PI * 0.65 + (Math.random() - 0.5) * 0.6;
           const sparkSpeed = 140 + Math.random() * 120;
-          this.particles.push({
+          this.spawn({
             x: nozzleX - 2,
             y: nozzleY,
             vx: -Math.cos(sparkAngle) * sparkSpeed - scrollSpeed * 0.3,
@@ -138,7 +162,7 @@ export class ParticleSystem {
         // D. PERIODIC SHOCK EXPANSION RINGS
         if (this.shockRingTimer >= 0.16) {
           this.shockRingTimer = 0;
-          this.particles.push({
+          this.spawn({
             x: nozzleX - 4,
             y: nozzleY + 4,
             vx: -scrollSpeed * 0.6 - 60,
@@ -157,7 +181,7 @@ export class ParticleSystem {
       // 2. AIRBORNE GLIDING / SLIPSTREAM CONTRAILS
       if (this.contrailTimer >= 0.06 && this.particles.length < 40) {
         this.contrailTimer = 0;
-        this.particles.push({
+        this.spawn({
           x: nozzleX - 2,
           y: nozzleY + 2,
           vx: -scrollSpeed * 0.6 - 40,
@@ -213,7 +237,7 @@ export class ParticleSystem {
    */
   public emitDust(x: number, y: number) {
     for (let i = 0; i < 2; i++) {
-      this.particles.push({
+      this.spawn({
         x: x - 8 + Math.random() * 6,
         y: y - 2 + Math.random() * 4,
         vx: -110 - Math.random() * 70,
@@ -236,7 +260,7 @@ export class ParticleSystem {
     for (let i = 0; i < 8; i++) {
       const angle = (Math.PI * 2 * i) / 8 + Math.random() * 0.3;
       const speed = 70 + Math.random() * 90;
-      this.particles.push({
+      this.spawn({
         x,
         y,
         vx: Math.cos(angle) * speed,
@@ -259,7 +283,7 @@ export class ParticleSystem {
       const angle = Math.random() * Math.PI * 2;
       const speed = 90 + Math.random() * 280;
       const isSpark = Math.random() > 0.45;
-      this.particles.push({
+      this.spawn({
         x,
         y,
         vx: Math.cos(angle) * speed,
@@ -276,7 +300,7 @@ export class ParticleSystem {
   }
 
   /**
-   * High-Performance in-place particle array update (Zero splice GC pressure)
+   * High-Performance in-place particle array update (Zero splice GC pressure, auto-pooling)
    */
   public update(dt: number) {
     const clampedDt = Math.min(0.05, dt);
@@ -304,6 +328,11 @@ export class ParticleSystem {
         }
 
         this.particles[writeIdx++] = p;
+      } else {
+        // Recycle dead particle back into pool to prevent GC pauses
+        if (this.pool.length < 90) {
+          this.pool.push(p);
+        }
       }
     }
     this.particles.length = writeIdx;
@@ -374,10 +403,15 @@ export class ParticleSystem {
   }
 
   /**
-   * Reset all particles
+   * Reset all particles and recycle them
    */
   public clear() {
-    this.particles = [];
+    for (let i = 0; i < this.particles.length; i++) {
+      if (this.pool.length < 90) {
+        this.pool.push(this.particles[i]);
+      }
+    }
+    this.particles.length = 0;
     this.hasLastNozzle = false;
   }
 }

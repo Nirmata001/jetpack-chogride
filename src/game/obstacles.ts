@@ -24,25 +24,26 @@ export class ObstacleManager {
   }
 
   /**
-   * Dynamically calculates speed scaling and obstacle/missile spawn rates based on distance traveled.
+   * Dynamically calculates obstacle/missile spawn rates and difficulty scaling based on distance traveled.
+   * Progresses smoothly over 1,800 meters so game speed and obstacle density stay balanced and fun.
    */
-  public getDynamicDifficulty(distanceMeters: number, baseScrollSpeed: number) {
-    const speedMultiplier = 1.0 + Math.min(1.8, distanceMeters / 250);
-    const scrollSpeed = baseScrollSpeed * speedMultiplier;
-    const spawnCooldown = Math.max(0.65, 1.8 - (distanceMeters / 200) * 0.4);
-    const missileCooldown = Math.max(2.0, 7.0 - (distanceMeters / 150) * 1.5);
-    return { scrollSpeed, spawnCooldown, missileCooldown, speedMultiplier };
+  public getDynamicDifficulty(distanceMeters: number, currentScrollSpeed: number) {
+    const progress = Math.min(1.0, distanceMeters / 1800);
+    const scrollSpeed = currentScrollSpeed;
+    const spawnCooldown = Math.max(1.3, 2.4 - progress * 1.1);
+    const missileCooldown = Math.max(4.5, 9.5 - progress * 4.5);
+    return { scrollSpeed, spawnCooldown, missileCooldown, speedMultiplier: 1.0 + progress * 0.35 };
   }
 
   public update(
     dt: number,
     distanceMeters: number,
-    baseScrollSpeed: number,
+    currentScrollSpeed: number,
     playerY: number,
     onMissileWarning: () => void,
     onMissileLaunch: () => void
   ) {
-    const difficulty = this.getDynamicDifficulty(distanceMeters, baseScrollSpeed);
+    const difficulty = this.getDynamicDifficulty(distanceMeters, currentScrollSpeed);
     const scrollSpeed = difficulty.scrollSpeed;
 
     // 1. Move obstacles left
@@ -247,8 +248,8 @@ export class ObstacleManager {
       targetY: playerY,
       width: 44,
       height: 22,
-      warningTimer: 1.5,
-      speed: 460, // extra speed over scroll
+      warningTimer: 1.8,
+      speed: 220, // extra speed over scroll - fair and reactable
       trailTimer: 0,
       state: 'WARNING',
       hitbox: {
