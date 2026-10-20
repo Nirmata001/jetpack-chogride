@@ -1,6 +1,6 @@
 {
-  "name": "Jetpack Joyride Engine & Kotlin Android Lab",
-  "description": "Interactive mechanics simulator and complete Kotlin Android Studio architecture for Jetpack Joyride: endless scrolling, gravity physics, vertical velocity, AABB collisions, and game loop integration.",
+  "name": "Jetpack Chogride",
+  "description": "Jetpack Chogride - Endless runner arcade game and physics simulator featuring Chog the chibi hedgehog hero: vertical jetpack thrust, endless lab scrolling, zappers, missiles, and coin collecting.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

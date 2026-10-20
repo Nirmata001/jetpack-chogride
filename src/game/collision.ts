@@ -60,42 +60,4 @@ export function checkCircleAABB(
   return distanceX * distanceX + distanceY * distanceY < radius * radius;
 }
 
-/**
- * Checks line segment intersection with player AABB box.
- * Ideal for laser beams or angled zapper plasma streams.
- */
-export function checkLineAABB(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  box: BoundingBox,
-  beamRadius: number = 6
-): boolean {
-  // Quick reject if entire segment is on one side of expanded box
-  const minX = Math.min(x1, x2) - beamRadius;
-  const maxX = Math.max(x1, x2) + beamRadius;
-  const minY = Math.min(y1, y2) - beamRadius;
-  const maxY = Math.max(y1, y2) + beamRadius;
 
-  if (maxX < box.left || minX > box.right || maxY < box.top || minY > box.bottom) {
-    return false;
-  }
-
-  // Sample points along the segment (at intervals of beamRadius)
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.hypot(dx, dy);
-  const steps = Math.max(4, Math.ceil(len / (beamRadius * 2)));
-
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const px = x1 + dx * t;
-    const py = y1 + dy * t;
-    if (checkCircleAABB(px, py, beamRadius, box)) {
-      return true;
-    }
-  }
-
-  return false;
-}

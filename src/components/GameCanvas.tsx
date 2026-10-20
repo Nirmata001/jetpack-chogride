@@ -15,7 +15,6 @@ import {
   CANVAS_VIRTUAL_WIDTH,
   PLAYABLE_BOTTOM,
   PLAYABLE_TOP,
-  CHARACTERS,
 } from '../game/constants';
 import { updatePlayerPhysics } from '../game/physics';
 import { checkAABB, checkCircleAABB, createFairHitbox } from '../game/collision';
@@ -28,40 +27,33 @@ import {
   VolumeX,
   RotateCcw,
   Eye,
-  Zap,
   Play,
   Pause,
   Maximize,
   Minimize,
-  Settings,
   Sliders,
-  Users,
 } from 'lucide-react';
 
 interface GameCanvasProps {
   physicsConfig: PhysicsConfig;
   onUpdatePhysics: (config: PhysicsConfig) => void;
   selectedCharacter: CharacterDef;
-  onSelectCharacter: (char: CharacterDef) => void;
   showHitboxes: boolean;
   onToggleHitboxes: () => void;
   slowMotion: boolean;
   onToggleSlowMotion: () => void;
   onNavigateToTuningPage: () => void;
-  onNavigateToCharacterPage: () => void;
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
   physicsConfig,
   onUpdatePhysics,
   selectedCharacter,
-  onSelectCharacter,
   showHitboxes,
   onToggleHitboxes,
   slowMotion,
   onToggleSlowMotion,
   onNavigateToTuningPage,
-  onNavigateToCharacterPage,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -73,7 +65,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [causeOfDeath, setCauseOfDeath] = useState<string>('');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [showSettingsMenu, setShowSettingsMenu] = useState<boolean>(false);
 
   // High-performance HUD direct DOM refs (prevents 60 FPS React re-render thrashing)
   const hudDistanceRef = useRef<HTMLSpanElement | null>(null);
@@ -616,47 +607,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4 text-cyan-400" />}
             </button>
 
-            {/* Settings / Lab / Hangar Menu Button */}
-            <div className="relative">
-              <button
-                onClick={() => {
-                  if (gameState === 'PLAYING') handlePause();
-                  setShowSettingsMenu(!showSettingsMenu);
-                }}
-                className="arcade-btn p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 cursor-pointer"
-                title="Arcade Settings, Lab & Hangar"
-              >
-                <Settings className="w-4 h-4 text-amber-400" />
-              </button>
-
-              {showSettingsMenu && (
-                <div className="absolute right-0 top-12 w-52 bg-slate-900 border-2 border-slate-700 rounded-2xl shadow-2xl p-2 z-50 flex flex-col gap-1.5 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] font-bouncy font-extrabold text-amber-400 uppercase tracking-wider">
-                    Arcade Settings
-                  </div>
-                  <button
-                    onClick={() => {
-                      setShowSettingsMenu(false);
-                      onNavigateToTuningPage();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800 text-xs font-bouncy font-bold text-slate-200 hover:text-white cursor-pointer transition-colors"
-                  >
-                    <Sliders className="w-4 h-4 text-cyan-400" />
-                    <span>GADGET LAB</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowSettingsMenu(false);
-                      onNavigateToCharacterPage();
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800 text-xs font-bouncy font-bold text-slate-200 hover:text-white cursor-pointer transition-colors"
-                  >
-                    <Users className="w-4 h-4 text-pink-400" />
-                    <span>HERO HANGAR</span>
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* Gadget Lab (Settings) Button - Opens directly without pause overlay conflict */}
+            <button
+              onClick={() => {
+                if (gameState === 'PLAYING') handlePause();
+                onNavigateToTuningPage();
+              }}
+              className="arcade-btn flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 cursor-pointer"
+              title="Gadget Lab (Physics & Flight Settings)"
+            >
+              <Sliders className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline text-xs font-arcade font-bold">LAB</span>
+            </button>
           </div>
         </div>
       )}

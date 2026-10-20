@@ -6,7 +6,7 @@
 import React from 'react';
 import { PhysicsConfig } from '../types/game';
 import { PhysicsControls } from './PhysicsControls';
-import { Sparkles, Flame, Gauge, Shield, Zap } from 'lucide-react';
+import { Sparkles, Flame, Gauge, Shield } from 'lucide-react';
 
 interface TuningPageProps {
   physicsConfig: PhysicsConfig;

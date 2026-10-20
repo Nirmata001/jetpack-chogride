@@ -111,7 +111,7 @@ export const PhysicsControls: React.FC<PhysicsControlsProps> = ({ config, onChan
             <span className="block text-xs font-arcade text-white group-hover:text-amber-400">
               ⭐ CLASSIC
             </span>
-            <span className="text-[10px] text-slate-400 font-bouncy">Standard Joyride feel</span>
+            <span className="text-[10px] text-slate-400 font-bouncy">Standard Chogride feel</span>
           </button>
 
 

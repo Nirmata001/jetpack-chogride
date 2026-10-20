@@ -64,35 +64,10 @@ export class ParticleSystem {
     this.shockRingTimer += dt;
     this.contrailTimer += dt;
 
-    const isChog = character.id === 'chog';
-    const jetpackType = character.jetpackType;
-
-    // Theme color palettes based on character & jetpack design
-    let primaryColor = character.thrustColor;
-    let secondaryColor = character.accentColor;
-    let smokeBaseColor = 'rgba(100, 116, 139, 0.35)';
-
-    if (isChog || jetpackType === 'cosmic_spark') {
-      primaryColor = '#facc15';    // Star Gold
-      secondaryColor = '#ec4899';  // Cosmic Magenta
-      smokeBaseColor = 'rgba(168, 85, 247, 0.32)'; // Cosmic Violet/Pink vapor
-    } else if (jetpackType === 'bullet') {
-      primaryColor = '#fbbf24';    // Gunpowder Amber
-      secondaryColor = '#ef4444';  // Muzzle Flame
-      smokeBaseColor = 'rgba(148, 163, 184, 0.45)'; // Heavy combustion gray smoke
-    } else if (jetpackType === 'plasma') {
-      primaryColor = '#22d3ee';    // Electric Cyan
-      secondaryColor = '#ec4899';  // Plasma Pink
-      smokeBaseColor = 'rgba(6, 182, 212, 0.3)';   // Neon ionization mist
-    } else if (jetpackType === 'ion') {
-      primaryColor = '#34d399';    // Emerald Ion
-      secondaryColor = '#38bdf8';  // Sky Blue
-      smokeBaseColor = 'rgba(52, 211, 153, 0.28)';  // Anti-gravity ion glow
-    } else if (jetpackType === 'steam') {
-      primaryColor = '#fed7aa';    // Hot Steam Glow
-      secondaryColor = '#f97316';  // Boiler Ember
-      smokeBaseColor = 'rgba(248, 250, 252, 0.65)'; // Dense white steam
-    }
+    // Theme color palettes for Chog
+    const primaryColor = character.thrustColor || '#facc15';
+    const secondaryColor = character.accentColor || '#ec4899';
+    const smokeBaseColor = 'rgba(168, 85, 247, 0.32)';
 
     if (isThrusting) {
       // 1. ACTIVE THRUST EXHAUST PLUME
@@ -153,7 +128,7 @@ export class ParticleSystem {
             life: 0.16 + Math.random() * 0.12,
             maxLife: 0.28,
             size: 1.6 + Math.random() * 1.2,
-            color: isChog ? (Math.random() > 0.5 ? '#fde047' : '#f43f5e') : primaryColor,
+            color: Math.random() > 0.5 ? '#fde047' : '#f43f5e',
             type: 'exhaust_spark',
             drag: 0.95,
           });
@@ -189,7 +164,7 @@ export class ParticleSystem {
           life: 0.22,
           maxLife: 0.22,
           size: 3 + Math.random() * 1.5,
-          color: isChog ? 'rgba(236, 72, 153, 0.2)' : 'rgba(226, 232, 240, 0.22)',
+          color: 'rgba(236, 72, 153, 0.2)',
           type: 'contrail',
           drag: 0.95,
           growthRate: 8,
@@ -208,29 +183,7 @@ export class ParticleSystem {
     this.hasLastNozzle = false;
   }
 
-  /**
-   * Classic Jetpack Emission (for legacy callers)
-   */
-  public emitJetpack(
-    x: number,
-    y: number,
-    type: 'bullet' | 'plasma' | 'ion' | 'steam' | 'cosmic_spark',
-    thrustColor: string
-  ) {
-    const dummyChar: CharacterDef = {
-      id: type === 'cosmic_spark' ? 'chog' : 'classic',
-      name: 'Pilot',
-      title: 'Pilot',
-      description: '',
-      jetpackType: type,
-      accentColor: thrustColor,
-      secondaryColor: '#f43f5e',
-      thrustColor: thrustColor,
-      massMultiplier: 1,
-      thrustMultiplier: 1,
-    };
-    this.emitFlyingExhaustTrail(x, y, 0, true, dummyChar, 380, 0.016);
-  }
+
 
   /**
    * Running dust kicking up when player boots touch the catwalk floor
