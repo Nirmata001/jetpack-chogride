@@ -3186,11 +3186,38 @@ export class GameRenderer {
         }
       } else {
         const z = obs as ZapperObstacle;
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.28)';
-        ctx.fillRect(z.hitbox.left, z.hitbox.top, z.hitbox.width, z.hitbox.height);
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 1.5;
+        // Outer broadphase bounding box (dotted red)
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
         ctx.strokeRect(z.hitbox.left, z.hitbox.top, z.hitbox.width, z.hitbox.height);
+        ctx.setLineDash([]);
+
+        // Exact active laser beam capsule
+        const halfLen = z.length / 2;
+        const cos = Math.cos(z.angle);
+        const sin = Math.sin(z.angle);
+        const x1 = z.x - halfLen * cos;
+        const y1 = z.y - halfLen * sin;
+        const x2 = z.x + halfLen * cos;
+        const y2 = z.y + halfLen * sin;
+
+        // Active laser core line (11px wide capsule)
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.65)';
+        ctx.lineWidth = 11;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // Active end nodes (9.5px radius)
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.8)';
+        ctx.beginPath();
+        ctx.arc(x1, y1, 9.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x2, y2, 9.5, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
 

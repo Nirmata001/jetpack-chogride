@@ -9,6 +9,7 @@ import {
   GameState,
   PhysicsConfig,
   PlayerMovementState,
+  ZapperObstacle,
 } from '../types/game';
 import {
   CANVAS_VIRTUAL_HEIGHT,
@@ -17,7 +18,12 @@ import {
   PLAYABLE_TOP,
 } from '../game/constants';
 import { updatePlayerPhysics } from '../game/physics';
-import { checkAABB, checkCircleAABB, createFairHitbox } from '../game/collision';
+import {
+  checkAABB,
+  checkCircleAABB,
+  checkZapperCollision,
+  createFairHitbox,
+} from '../game/collision';
 import { ObstacleManager } from '../game/obstacles';
 import { ParticleSystem } from '../game/particles';
 import { GameRenderer } from '../game/renderer';
@@ -76,6 +82,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Engine references
   const isFiringRef = useRef<boolean>(false);
+  const keyLockedUntilUpRef = useRef<boolean>(false);
+  const pointerLockedUntilUpRef = useRef<boolean>(false);
   const slowMotionRef = useRef<boolean>(slowMotion);
   const characterRef = useRef<CharacterDef>(selectedCharacter);
   const configRef = useRef<PhysicsConfig>(physicsConfig);
@@ -96,7 +104,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     sound.startBackgroundMusic();
   }, []);
 
-  // Game internal state ref (CANVAS GAMEPLAY ENGINE - UNTOUCHED)
+  // Game internal state ref (CANVAS GAMEPLAY ENGINE)
   const engineRef = useRef({
     playerY: PLAYABLE_BOTTOM - 52,
     playerX: 140,
@@ -108,6 +116,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     isGrounded: true,
     netAcceleration: 0,
     deathTimer: 0,
+    justStarted: false,
     obstacleManager: new ObstacleManager(),
     particleSystem: new ParticleSystem(),
     renderer: new GameRenderer(),
@@ -118,8 +127,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   });
 
   const handleStartGame = useCallback(() => {
+    // 1. Force cut all thruster inputs, sound, and HUD alerts immediately
+    isFiringRef.current = false;
+    sound.stopJetpack();
+    if (flightDotRef.current) {
+      flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+    }
+    if (flightTextRef.current) {
+      flightTextRef.current.textContent = 'TAP / HOLD SPACE TO FLY · [P] PAUSE';
+    }
+
+    // 2. Lock player solidly to the floor catwalk with zero velocity
     const e = engineRef.current;
-    e.playerY = PLAYABLE_BOTTOM - 52;
+    const groundY = PLAYABLE_BOTTOM - 52;
+    e.playerY = groundY;
     e.playerVy = 0;
     e.distanceMeters = 0;
     e.coinsCollected = 0;
@@ -130,10 +151,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     e.deathTimer = 0;
     e.obstacleManager.reset();
     e.particleSystem.clear();
+    e.justStarted = true;
+    e.lastFrameTime = performance.now();
+
+    // 3. Lock pointer until the user lifts their finger/mouse
+    pointerLockedUntilUpRef.current = true;
+
     setDistance(0);
     setCoins(0);
     sound.startBackgroundMusic();
-    e.lastFrameTime = performance.now();
     setGameState('PLAYING');
   }, []);
 
@@ -154,6 +180,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const handleResume = useCallback(() => {
     if (gameState === 'PAUSED') {
+      engineRef.current.justStarted = true;
       engineRef.current.lastFrameTime = performance.now();
       setGameState('PLAYING');
     }
@@ -174,6 +201,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       return;
     }
     if (gameState === 'PLAYING') {
+      // Disallow firing if the same press started the game until released
+      if (pointerLockedUntilUpRef.current) return;
+
       isFiringRef.current = true;
       if (flightDotRef.current) {
         flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
@@ -187,17 +217,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   }, [gameState, handleStartGame]);
 
   const handleInputEnd = useCallback(() => {
-    if (gameState === 'PLAYING') {
-      isFiringRef.current = false;
-      if (flightDotRef.current) {
-        flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
-      }
-      if (flightTextRef.current) {
-        flightTextRef.current.textContent = 'TAP / HOLD SPACE TO FLY · [P] PAUSE';
-      }
-      sound.stopJetpack();
+    pointerLockedUntilUpRef.current = false;
+    isFiringRef.current = false;
+    if (flightDotRef.current) {
+      flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
     }
-  }, [gameState]);
+    if (flightTextRef.current) {
+      flightTextRef.current.textContent = 'TAP / HOLD SPACE TO FLY · [P] PAUSE';
+    }
+    sound.stopJetpack();
+  }, []);
 
   // Fullscreen toggle
   const handleToggleFullscreen = () => {
@@ -218,7 +247,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
-  // Keyboard controls
+  // Keyboard & Window controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'KeyM') {
@@ -233,12 +262,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           return;
         }
         e.preventDefault();
+        // Prevent keydown hold from igniting thrusters on frame 0
+        keyLockedUntilUpRef.current = true;
         handleStartGame();
         return;
       }
 
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
+        // If this keypress was the one that started the game, wait until keyup
+        if (keyLockedUntilUpRef.current) return;
         if (gameState === 'PLAYING' && !isFiringRef.current) {
           handleInputStart();
         }
@@ -256,16 +289,32 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space' || e.code === 'ArrowUp') {
+        keyLockedUntilUpRef.current = false;
         e.preventDefault();
         handleInputEnd();
       }
     };
 
+    const handleWindowBlur = () => {
+      keyLockedUntilUpRef.current = false;
+      pointerLockedUntilUpRef.current = false;
+      handleInputEnd();
+    };
+
+    const handleWindowMouseUp = () => {
+      pointerLockedUntilUpRef.current = false;
+      handleInputEnd();
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('mouseup', handleWindowMouseUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
     };
   }, [gameState, handleStartGame, handleInputStart, handleInputEnd, handleRestart, handleTogglePause]);
 
@@ -290,10 +339,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (!isRunning) return;
 
       const e = engine;
-      const rawDt = (timestamp - e.lastFrameTime) / 1000;
+
+      // Safe Frame 0 synchronization after start or unpause
+      if (e.justStarted) {
+        e.justStarted = false;
+        e.lastFrameTime = timestamp;
+        e.playerY = PLAYABLE_BOTTOM - 52;
+        e.playerVy = 0;
+        e.isGrounded = true;
+        e.movementState = 'RUNNING';
+        isFiringRef.current = false;
+      }
+
+      const rawDt = Math.max(0, (timestamp - e.lastFrameTime) / 1000);
       e.lastFrameTime = timestamp;
 
-      const clampedDt = Math.min(rawDt, 0.08);
+      const clampedDt = Math.min(rawDt, 0.05);
       const dt = slowMotionRef.current ? clampedDt * 0.28 : clampedDt;
 
       const char = characterRef.current;
@@ -371,15 +432,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           config.hitboxMarginPercent
         );
 
-        // Collision detection against obstacles
+        // Collision detection against obstacles with exact, fair geometry
         for (const obs of e.obstacleManager.obstacles) {
-          if (checkAABB(playerFairHitbox, obs.hitbox)) {
+          const isHit =
+            obs.type === 'missile'
+              ? checkAABB(playerFairHitbox, obs.hitbox)
+              : checkZapperCollision(obs as ZapperObstacle, playerFairHitbox);
+
+          if (isHit) {
             if (obs.type === 'missile') {
               sound.playExplosion();
             } else {
               sound.playElectricZap();
             }
             sound.stopJetpack();
+            isFiringRef.current = false;
+            pointerLockedUntilUpRef.current = false;
+            keyLockedUntilUpRef.current = false;
             e.movementState = 'DYING';
             e.particleSystem.emitExplosion(e.playerX + 22, e.playerY + 26);
             setCauseOfDeath(
@@ -627,8 +696,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       <div
         className="w-full h-full flex items-center justify-center relative cursor-pointer overflow-hidden"
         onMouseDown={gameState === 'READY' ? handleStartGame : handleInputStart}
-        onMouseUp={gameState === 'READY' ? undefined : handleInputEnd}
-        onMouseLeave={gameState === 'READY' ? undefined : handleInputEnd}
+        onMouseUp={handleInputEnd}
+        onMouseLeave={handleInputEnd}
         onTouchStart={(e) => {
           e.preventDefault();
           if (gameState === 'READY') {
@@ -639,9 +708,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }}
         onTouchEnd={(e) => {
           e.preventDefault();
-          if (gameState !== 'READY') {
-            handleInputEnd();
-          }
+          handleInputEnd();
         }}
       >
         <canvas
@@ -782,7 +849,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 <span>FLY AGAIN! [R]</span>
               </button>
               <button
-                onClick={() => setGameState('READY')}
+                onClick={() => {
+                  isFiringRef.current = false;
+                  sound.stopJetpack();
+                  const e = engineRef.current;
+                  e.playerY = PLAYABLE_BOTTOM - 52;
+                  e.playerVy = 0;
+                  e.isGrounded = true;
+                  e.movementState = 'RUNNING';
+                  e.justStarted = true;
+                  setGameState('READY');
+                }}
                 className="arcade-btn px-6 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-arcade font-bold text-xs tracking-wider border-2 border-slate-700/80 cursor-pointer transition-colors"
               >
                 TITLE SCREEN

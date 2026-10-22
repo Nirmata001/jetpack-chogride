@@ -450,6 +450,22 @@ class SoundEngine {
     } catch {}
   }
 
+  private distortionCurve: Float32Array | null = null;
+  private getDistortionCurve(): Float32Array {
+    if (!this.distortionCurve) {
+      const n_samples = 256;
+      const curve = new Float32Array(n_samples);
+      const deg = Math.PI / 180;
+      const k = 45; // Aggressive electrical arc saturation
+      for (let i = 0; i < n_samples; ++i) {
+        const x = (i * 2) / n_samples - 1;
+        curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+      }
+      this.distortionCurve = curve;
+    }
+    return this.distortionCurve;
+  }
+
   public playElectricZap() {
     if (this.isMuted) return;
     this.initContext();
@@ -458,49 +474,83 @@ class SoundEngine {
     try {
       const now = this.ctx.currentTime;
 
-      // 1. High-Voltage Ionization Breakdown & Rapid Frequency Stutter
-      const zapOsc = this.ctx.createOscillator();
-      const zapGain = this.ctx.createGain();
+      // 1. HIGH-VOLTAGE FM ARC CARRIER & 120Hz MODULATOR (The snarling "KZRRRR-ZZZT" growl)
+      const carrierOsc = this.ctx.createOscillator();
+      const carrierGain = this.ctx.createGain();
+      const modOsc = this.ctx.createOscillator();
+      const modGain = this.ctx.createGain();
 
-      zapOsc.type = 'sawtooth';
-      // Electrical arc pitch cascade: 1600Hz -> 380Hz -> 920Hz -> 180Hz -> 75Hz
-      zapOsc.frequency.setValueAtTime(1600, now);
-      zapOsc.frequency.exponentialRampToValueAtTime(380, now + 0.035);
-      zapOsc.frequency.setValueAtTime(920, now + 0.04);
-      zapOsc.frequency.exponentialRampToValueAtTime(220, now + 0.1);
-      zapOsc.frequency.setValueAtTime(450, now + 0.11);
-      zapOsc.frequency.exponentialRampToValueAtTime(70, now + 0.38);
+      carrierOsc.type = 'sawtooth';
+      // Voltage breakdown pitch descent
+      carrierOsc.frequency.setValueAtTime(420, now);
+      carrierOsc.frequency.exponentialRampToValueAtTime(140, now + 0.12);
+      carrierOsc.frequency.setValueAtTime(260, now + 0.13);
+      carrierOsc.frequency.exponentialRampToValueAtTime(75, now + 0.42);
 
-      zapGain.gain.setValueAtTime(0.38, now);
-      zapGain.gain.setValueAtTime(0.24, now + 0.035);
-      zapGain.gain.setValueAtTime(0.32, now + 0.07);
-      zapGain.gain.setValueAtTime(0.18, now + 0.14);
-      zapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+      // 120Hz arc pulse modulator driving carrier frequency
+      modOsc.type = 'square';
+      modOsc.frequency.setValueAtTime(120, now);
+      modOsc.frequency.setValueAtTime(180, now + 0.08);
+      modOsc.frequency.setValueAtTime(90, now + 0.2);
 
-      zapOsc.connect(zapGain);
-      zapGain.connect(this.ctx.destination);
-      zapOsc.start(now);
-      zapOsc.stop(now + 0.44);
+      // Deep FM modulation index creating rich electric sidebands
+      modGain.gain.setValueAtTime(480, now);
+      modGain.gain.exponentialRampToValueAtTime(80, now + 0.4);
 
-      // 2. Gritty 120Hz Electrical Arc Mains Hum
-      const buzzOsc = this.ctx.createOscillator();
-      const buzzGain = this.ctx.createGain();
+      modOsc.connect(modGain);
+      modGain.connect(carrierOsc.frequency);
 
-      buzzOsc.type = 'square';
-      buzzOsc.frequency.setValueAtTime(120, now);
-      buzzOsc.frequency.setValueAtTime(240, now + 0.05);
-      buzzOsc.frequency.setValueAtTime(90, now + 0.12);
-      buzzOsc.frequency.setValueAtTime(60, now + 0.22);
+      // Waveshaper for overdriven arc distortion
+      const shaper = this.ctx.createWaveShaper();
+      shaper.curve = this.getDistortionCurve() as Float32Array<ArrayBuffer>;
+      shaper.oversample = '2x';
 
-      buzzGain.gain.setValueAtTime(0.25, now);
-      buzzGain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+      // Arc bandpass filter to shape cutting electric presence
+      const arcFilter = this.ctx.createBiquadFilter();
+      arcFilter.type = 'bandpass';
+      arcFilter.frequency.setValueAtTime(1200, now);
+      arcFilter.frequency.exponentialRampToValueAtTime(450, now + 0.42);
+      arcFilter.Q.setValueAtTime(2.2, now);
 
-      buzzOsc.connect(buzzGain);
-      buzzGain.connect(this.ctx.destination);
-      buzzOsc.start(now);
-      buzzOsc.stop(now + 0.38);
+      carrierGain.gain.setValueAtTime(0.42, now);
+      carrierGain.gain.setValueAtTime(0.35, now + 0.04);
+      carrierGain.gain.setValueAtTime(0.38, now + 0.09);
+      carrierGain.gain.setValueAtTime(0.24, now + 0.18);
+      carrierGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
 
-      // 3. High-Frequency Spark Crackle & Sizzle (Filtered Noise Burst)
+      carrierOsc.connect(shaper);
+      shaper.connect(arcFilter);
+      arcFilter.connect(carrierGain);
+      carrierGain.connect(this.ctx.destination);
+
+      carrierOsc.start(now);
+      modOsc.start(now);
+      carrierOsc.stop(now + 0.46);
+      modOsc.stop(now + 0.46);
+
+      // 2. INSTANTANEOUS 10kV CAPACITIVE DISCHARGE SNAPS ("CRACK!")
+      const snapOsc = this.ctx.createOscillator();
+      const snapGain = this.ctx.createGain();
+
+      snapOsc.type = 'sawtooth';
+      // Primary snap: 2600Hz -> 180Hz in 25ms
+      snapOsc.frequency.setValueAtTime(2600, now);
+      snapOsc.frequency.exponentialRampToValueAtTime(180, now + 0.025);
+      // Secondary rebound snap at 45ms: 1800Hz -> 140Hz
+      snapOsc.frequency.setValueAtTime(1800, now + 0.045);
+      snapOsc.frequency.exponentialRampToValueAtTime(140, now + 0.08);
+
+      snapGain.gain.setValueAtTime(0.48, now);
+      snapGain.gain.exponentialRampToValueAtTime(0.01, now + 0.035);
+      snapGain.gain.setValueAtTime(0.38, now + 0.045);
+      snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+
+      snapOsc.connect(snapGain);
+      snapGain.connect(this.ctx.destination);
+      snapOsc.start(now);
+      snapOsc.stop(now + 0.12);
+
+      // 3. HIGH-FREQUENCY MULTI-SPARK SPUTTER / TASER CRACKLE (4.2kHz Bandpass Noise)
       const buffer = this.getNoiseBuffer();
       if (buffer) {
         const noiseSrc = this.ctx.createBufferSource();
@@ -509,25 +559,43 @@ class SoundEngine {
 
         const noiseFilter = this.ctx.createBiquadFilter();
         noiseFilter.type = 'bandpass';
-        noiseFilter.frequency.setValueAtTime(3400, now);
-        noiseFilter.Q.setValueAtTime(3.2, now);
+        noiseFilter.frequency.setValueAtTime(4200, now);
+        noiseFilter.Q.setValueAtTime(4.0, now);
 
         const noiseGain = this.ctx.createGain();
-        noiseGain.gain.setValueAtTime(0.28, now);
-        // Random sputtering spark pulses
-        noiseGain.gain.setValueAtTime(0.06, now + 0.025);
-        noiseGain.gain.setValueAtTime(0.3, now + 0.05);
-        noiseGain.gain.setValueAtTime(0.08, now + 0.1);
-        noiseGain.gain.setValueAtTime(0.24, now + 0.14);
-        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+        noiseGain.gain.setValueAtTime(0.38, now);
+        // Stuttering micro-sparks leaping across the gap
+        noiseGain.gain.setValueAtTime(0.06, now + 0.02);
+        noiseGain.gain.setValueAtTime(0.42, now + 0.045);
+        noiseGain.gain.setValueAtTime(0.08, now + 0.08);
+        noiseGain.gain.setValueAtTime(0.36, now + 0.11);
+        noiseGain.gain.setValueAtTime(0.1, now + 0.16);
+        noiseGain.gain.setValueAtTime(0.28, now + 0.2);
+        noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
 
         noiseSrc.connect(noiseFilter);
         noiseFilter.connect(noiseGain);
         noiseGain.connect(this.ctx.destination);
 
         noiseSrc.start(now);
-        noiseSrc.stop(now + 0.42);
+        noiseSrc.stop(now + 0.46);
       }
+
+      // 4. METALLIC IONIZATION RING / PLASMA OVERTONE
+      const ringOsc = this.ctx.createOscillator();
+      const ringGain = this.ctx.createGain();
+
+      ringOsc.type = 'sine';
+      ringOsc.frequency.setValueAtTime(1760, now);
+      ringOsc.frequency.exponentialRampToValueAtTime(580, now + 0.25);
+
+      ringGain.gain.setValueAtTime(0.24, now);
+      ringGain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+
+      ringOsc.connect(ringGain);
+      ringGain.connect(this.ctx.destination);
+      ringOsc.start(now);
+      ringOsc.stop(now + 0.28);
     } catch {}
   }
 

@@ -123,28 +123,28 @@ export class ObstacleManager {
     if (obs.type === 'zapper_horizontal') {
       obs.hitbox = {
         left: obs.x - halfLen,
-        top: obs.y - 14,
+        top: obs.y - 10,
         right: obs.x + halfLen,
-        bottom: obs.y + 14,
+        bottom: obs.y + 10,
         width: obs.length,
-        height: 28,
+        height: 20,
       };
     } else if (obs.type === 'zapper_vertical') {
       obs.hitbox = {
-        left: obs.x - 14,
+        left: obs.x - 10,
         top: obs.y - halfLen,
-        right: obs.x + 14,
+        right: obs.x + 10,
         bottom: obs.y + halfLen,
-        width: 28,
+        width: 20,
         height: obs.length,
       };
     } else {
-      // Diagonal or Rotating
+      // Diagonal or Rotating broadphase box
       const rad = obs.angle;
       const cos = Math.abs(Math.cos(rad));
       const sin = Math.abs(Math.sin(rad));
-      const w = obs.length * cos + 24 * sin;
-      const h = obs.length * sin + 24 * cos;
+      const w = obs.length * cos + 20 * sin;
+      const h = obs.length * sin + 20 * cos;
       obs.hitbox = {
         left: obs.x - w / 2,
         top: obs.y - h / 2,
