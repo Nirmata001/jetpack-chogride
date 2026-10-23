@@ -3,8 +3,8 @@
 @layer base {
   body {
     font-family: 'Rubik', system-ui, -apple-system, sans-serif;
-    color: #1c1c15;
-    background-color: #fdf9ee;
+    color: #f8fafc;
+    background-color: #020617;
   }
   
   .font-headline {

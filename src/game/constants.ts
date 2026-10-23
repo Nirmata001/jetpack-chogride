@@ -37,3 +37,67 @@ export const CHOG_CHARACTER: CharacterDef = {
 };
 
 export const CHARACTERS: CharacterDef[] = [CHOG_CHARACTER];
+
+export interface PhysicsPreset {
+  id: string;
+  name: string;
+  description: string;
+  tag: string;
+  accentColor: string;
+  config: PhysicsConfig;
+}
+
+export const PHYSICS_PRESETS: PhysicsPreset[] = [
+  {
+    id: 'classic',
+    name: 'Classic Joyride',
+    description: 'Golden-calibrated arcade flight physics. Snappy vertical thrust and responsive descent.',
+    tag: 'STANDARD',
+    accentColor: 'amber',
+    config: { ...DEFAULT_PHYSICS },
+  },
+  {
+    id: 'moon',
+    name: 'Moon Gravity',
+    description: 'Drastic low-G laboratory simulation with soaring lofty air-time and gentle floating.',
+    tag: 'LOW-G',
+    accentColor: 'cyan',
+    config: {
+      ...DEFAULT_PHYSICS,
+      gravity: 780,
+      jetpackThrust: 1850,
+      terminalVelocityFall: 430,
+      terminalVelocityClimb: 480,
+    },
+  },
+  {
+    id: 'turbo',
+    name: 'Supersonic Turbo',
+    description: 'Accelerated 370px/s laboratory conveyor with high-powered military thruster kick.',
+    tag: 'HIGH SPEED',
+    accentColor: 'rose',
+    config: {
+      ...DEFAULT_PHYSICS,
+      baseScrollSpeed: 370,
+      jetpackThrust: 3200,
+      gravity: 1750,
+      terminalVelocityFall: 750,
+      terminalVelocityClimb: 680,
+    },
+  },
+  {
+    id: 'chill',
+    name: 'Floaty Feather',
+    description: 'Relaxed arcade flight with 22% forgiveness shield buffer for effortless coin collecting.',
+    tag: 'CASUAL',
+    accentColor: 'emerald',
+    config: {
+      ...DEFAULT_PHYSICS,
+      gravity: 1100,
+      jetpackThrust: 2200,
+      terminalVelocityFall: 490,
+      hitboxMarginPercent: 0.22,
+    },
+  },
+];
+

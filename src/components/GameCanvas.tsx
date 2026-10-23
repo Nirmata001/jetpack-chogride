@@ -29,6 +29,11 @@ import { ParticleSystem } from '../game/particles';
 import { GameRenderer } from '../game/renderer';
 import { sound } from '../game/sound';
 import {
+  loadGameStats,
+  recordRunStats,
+  GameStats,
+} from '../game/storage';
+import {
   Volume2,
   VolumeX,
   RotateCcw,
@@ -38,7 +43,18 @@ import {
   Maximize,
   Minimize,
   Sliders,
+  Trophy,
+  Zap,
+  Flame,
+  Shield,
+  Sparkles,
+  AlertTriangle,
+  ArrowRight,
+  User,
+  Wallet,
 } from 'lucide-react';
+import { PlayerProfileModal } from './PlayerProfileModal';
+import { getLocalPlayer, syncCoins } from '../lib/supabase';
 
 interface GameCanvasProps {
   physicsConfig: PhysicsConfig;
@@ -49,6 +65,14 @@ interface GameCanvasProps {
   slowMotion: boolean;
   onToggleSlowMotion: () => void;
   onNavigateToTuningPage: () => void;
+}
+
+export function getPilotRank(distance: number): { title: string; color: string } {
+  if (distance >= 1200) return { title: 'Legendary Chog', color: 'text-amber-400' };
+  if (distance >= 750) return { title: 'Cosmic Ace', color: 'text-purple-400' };
+  if (distance >= 400) return { title: 'Sonic Glider', color: 'text-cyan-400' };
+  if (distance >= 150) return { title: 'Corridor Runner', color: 'text-emerald-400' };
+  return { title: 'Hangar Cadet', color: 'text-slate-400' };
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -70,13 +94,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const [coins, setCoins] = useState<number>(0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [causeOfDeath, setCauseOfDeath] = useState<string>('');
+  const [deathType, setDeathType] = useState<'laser' | 'missile'>('laser');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [gameStats, setGameStats] = useState<GameStats>(() => loadGameStats());
+  const [isNewRecord, setIsNewRecord] = useState<boolean>(false);
+  const [isProfileOpen, setIsProfileOpen] = useState<boolean>(false);
 
   // High-performance HUD direct DOM refs (prevents 60 FPS React re-render thrashing)
   const hudDistanceRef = useRef<HTMLSpanElement | null>(null);
   const hudCoinsRef = useRef<HTMLSpanElement | null>(null);
-  const lastDistRef = useRef<number>(-1);
-  const lastCoinsRef = useRef<number>(-1);
+  const hudSpeedRef = useRef<HTMLSpanElement | null>(null);
   const flightDotRef = useRef<HTMLSpanElement | null>(null);
   const flightTextRef = useRef<HTMLSpanElement | null>(null);
 
@@ -127,14 +154,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   });
 
   const handleStartGame = useCallback(() => {
+    sound.playUiClick();
+
     // 1. Force cut all thruster inputs, sound, and HUD alerts immediately
     isFiringRef.current = false;
     sound.stopJetpack();
     if (flightDotRef.current) {
-      flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+      flightDotRef.current.className = 'w-2 h-2 rounded-full bg-slate-500';
     }
     if (flightTextRef.current) {
-      flightTextRef.current.textContent = 'TAP / HOLD SPACE TO FLY · [P] PAUSE';
+      flightTextRef.current.textContent = 'HOLD SPACE OR CLICK TO FLY';
     }
 
     // 2. Lock player solidly to the floor catwalk with zero velocity
@@ -159,6 +188,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     setDistance(0);
     setCoins(0);
+    setIsNewRecord(false);
     sound.startBackgroundMusic();
     setGameState('PLAYING');
   }, []);
@@ -169,6 +199,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const handlePause = useCallback(() => {
     if (gameState === 'PLAYING') {
+      sound.playUiClick();
       sound.stopJetpack();
       isFiringRef.current = false;
       const e = engineRef.current;
@@ -180,6 +211,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   const handleResume = useCallback(() => {
     if (gameState === 'PAUSED') {
+      sound.playUiClick();
       engineRef.current.justStarted = true;
       engineRef.current.lastFrameTime = performance.now();
       setGameState('PLAYING');
@@ -206,10 +238,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       isFiringRef.current = true;
       if (flightDotRef.current) {
-        flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
+        flightDotRef.current.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
       }
       if (flightTextRef.current) {
-        flightTextRef.current.textContent = '🔥 THRUSTERS FIRING!';
+        flightTextRef.current.textContent = 'THRUSTERS FIRING';
       }
       sound.startBackgroundMusic();
       sound.startJetpack(characterRef.current.jetpackType);
@@ -220,16 +252,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     pointerLockedUntilUpRef.current = false;
     isFiringRef.current = false;
     if (flightDotRef.current) {
-      flightDotRef.current.className = 'w-2.5 h-2.5 rounded-full bg-slate-500';
+      flightDotRef.current.className = 'w-2 h-2 rounded-full bg-slate-500';
     }
     if (flightTextRef.current) {
-      flightTextRef.current.textContent = 'TAP / HOLD SPACE TO FLY · [P] PAUSE';
+      flightTextRef.current.textContent = 'HOLD SPACE OR CLICK TO FLY';
     }
     sound.stopJetpack();
   }, []);
 
   // Fullscreen toggle
   const handleToggleFullscreen = () => {
+    sound.playUiClick();
     if (!document.fullscreenElement) {
       containerRef.current?.requestFullscreen().catch(() => {});
       setIsFullscreen(true);
@@ -250,19 +283,43 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   // Keyboard & Window controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      if (
+        activeTag === 'INPUT' ||
+        activeTag === 'TEXTAREA' ||
+        (document.activeElement as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
       if (e.code === 'KeyM') {
         e.preventDefault();
         handleToggleMute();
         return;
       }
 
-      if (gameState === 'READY') {
-        if (e.code === 'KeyF') {
-          handleToggleFullscreen();
-          return;
-        }
+      if (e.code === 'KeyF') {
         e.preventDefault();
-        // Prevent keydown hold from igniting thrusters on frame 0
+        handleToggleFullscreen();
+        return;
+      }
+
+      if (e.code === 'KeyL') {
+        e.preventDefault();
+        if (gameState === 'PLAYING') handlePause();
+        onNavigateToTuningPage();
+        return;
+      }
+
+      if (e.code === 'KeyH') {
+        e.preventDefault();
+        sound.playUiClick();
+        onToggleHitboxes();
+        return;
+      }
+
+      if (gameState === 'READY') {
+        e.preventDefault();
         keyLockedUntilUpRef.current = true;
         handleStartGame();
         return;
@@ -270,7 +327,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
-        // If this keypress was the one that started the game, wait until keyup
+        if (gameState === 'GAME_OVER') {
+          handleRestart();
+          return;
+        }
         if (keyLockedUntilUpRef.current) return;
         if (gameState === 'PLAYING' && !isFiringRef.current) {
           handleInputStart();
@@ -282,12 +342,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         if (gameState === 'GAME_OVER' || gameState === 'PAUSED') {
           handleRestart();
         }
-      } else if (e.code === 'KeyF') {
-        handleToggleFullscreen();
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      if (
+        activeTag === 'INPUT' ||
+        activeTag === 'TEXTAREA' ||
+        (document.activeElement as HTMLElement)?.isContentEditable
+      ) {
+        return;
+      }
+
       if (e.code === 'Space' || e.code === 'ArrowUp') {
         keyLockedUntilUpRef.current = false;
         e.preventDefault();
@@ -316,16 +383,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('mouseup', handleWindowMouseUp);
     };
-  }, [gameState, handleStartGame, handleInputStart, handleInputEnd, handleRestart, handleTogglePause]);
+  }, [gameState, handleStartGame, handleInputStart, handleInputEnd, handleRestart, handleTogglePause, onNavigateToTuningPage, onToggleHitboxes]);
 
   // Toggle Mute
   const handleToggleMute = () => {
+    sound.playUiClick();
     const nextMute = !isMuted;
     setIsMuted(nextMute);
     sound.setMuted(nextMute);
   };
 
-  // Main 60 FPS Game Loop (UNTOUCHED)
+  // Main 60 FPS Game Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -442,8 +510,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           if (isHit) {
             if (obs.type === 'missile') {
               sound.playExplosion();
+              setDeathType('missile');
+              setCauseOfDeath('Blasted by Homing Missile Rocket');
             } else {
               sound.playElectricZap();
+              setDeathType('laser');
+              setCauseOfDeath('Zapped by High-Voltage Plasma Field');
             }
             sound.stopJetpack();
             isFiringRef.current = false;
@@ -451,13 +523,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             keyLockedUntilUpRef.current = false;
             e.movementState = 'DYING';
             e.particleSystem.emitExplosion(e.playerX + 22, e.playerY + 26);
-            setCauseOfDeath(
-              obs.type === 'missile'
-                ? 'Blasted by Homing Missile Rocket!'
-                : 'Zapped by High-Voltage Electric Field!'
-            );
-            setDistance(Math.floor(e.distanceMeters));
-            setCoins(e.coinsCollected);
+
+            const finalDistance = Math.floor(e.distanceMeters);
+            const finalCoins = e.coinsCollected;
+            setDistance(finalDistance);
+            setCoins(finalCoins);
+
+            const recordResult = recordRunStats(finalDistance, finalCoins);
+            setIsNewRecord(recordResult.isNewRecord);
+            setGameStats(recordResult.stats);
+
+            // Synchronize earned coins with Supabase player profile if registered
+            const savedPlayer = getLocalPlayer();
+            if (savedPlayer && finalCoins > 0) {
+              syncCoins(savedPlayer.username, finalCoins).catch(() => {});
+            }
+
+            if (recordResult.isNewRecord && finalDistance > 10) {
+              sound.playRecordFanfare();
+            }
+
             setGameState('GAME_OVER');
             break;
           }
@@ -473,19 +558,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           }
         }
 
-        // High-Performance Dirty-Checked Direct DOM HUD Update (Zero React re-render stalls, no layout thrashing)
-        const distInt = Math.floor(e.distanceMeters);
-        if (distInt !== lastDistRef.current) {
-          lastDistRef.current = distInt;
-          if (hudDistanceRef.current) {
-            hudDistanceRef.current.textContent = `${distInt}m`;
-          }
+        // Direct DOM update for zero React render lag at 60 FPS
+        if (hudDistanceRef.current) {
+          hudDistanceRef.current.textContent = `${Math.floor(e.distanceMeters)}m`;
         }
-        if (e.coinsCollected !== lastCoinsRef.current) {
-          lastCoinsRef.current = e.coinsCollected;
-          if (hudCoinsRef.current) {
-            hudCoinsRef.current.textContent = `${e.coinsCollected}`;
-          }
+        if (hudCoinsRef.current) {
+          hudCoinsRef.current.textContent = e.coinsCollected.toString();
+        }
+        if (hudSpeedRef.current) {
+          hudSpeedRef.current.textContent = `${Math.round(e.scrollSpeed)} px/s`;
         }
 
         // Update particles
@@ -503,7 +584,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // 2. RENDER PIPELINE
       ctx.clearRect(0, 0, CANVAS_VIRTUAL_WIDTH, CANVAS_VIRTUAL_HEIGHT);
 
-      // Parallax backgrounds with reactive cartoon scientists
+      // Background Environment
       e.renderer.renderBackground(
         ctx,
         e.distanceMeters * 50,
@@ -516,10 +597,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // Coins
       e.renderer.renderCoins(ctx, e.obstacleManager.coins, e.animTime);
 
-      // Obstacles & Missiles
+      // Obstacles
       e.renderer.renderObstacles(ctx, e.obstacleManager.obstacles, e.animTime);
 
-      // Particles
+      // Exhaust & Spark Particles
       e.particleSystem.draw(ctx);
 
       // Player Sprite
@@ -576,123 +657,160 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     };
   }, [gameState, showHitboxes]);
 
+  const pilotRank = getPilotRank(distance);
+
   return (
     <div
       ref={containerRef}
       className="relative w-full h-screen flex flex-col bg-slate-950 overflow-hidden select-none"
     >
-      {/* VIBRANT ARCADE FLOATING HUD (During Gameplay / Paused / Game Over) */}
+      {/* Sci-Fi Laboratory Ambient Lighting & Background Grid */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {/* Dual corner ambient glows (Cosmic Magenta & Star Gold) */}
+        <div className="absolute -top-32 -left-32 w-96 h-96 bg-pink-500/10 rounded-full blur-3xl" />
+        <div className="absolute -top-32 -right-32 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[700px] h-64 bg-cyan-500/8 rounded-full blur-3xl" />
+
+        {/* Subtle high-tech dot matrix pattern on outer desktop borders */}
+        <div className="absolute inset-0 bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:32px_32px] opacity-25" />
+      </div>
+
+      {/* TOP ARCADE TELEMETRY HUD (Visible during PLAYING, PAUSED, GAME_OVER) */}
       {gameState !== 'READY' && (
-        <div className="absolute top-0 inset-x-0 z-20 flex items-center justify-between p-3 sm:px-6 bg-gradient-to-b from-slate-950/95 via-slate-950/60 to-transparent backdrop-blur-xs">
-          {/* Left Arcade Badges: Distance & Coins */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* Distance Meter Badge */}
-            <div className="flex items-center gap-2 bg-gradient-to-r from-slate-900 to-slate-800 px-3.5 py-1.5 rounded-2xl border-2 border-slate-700/80 shadow-lg">
-              <span className="text-sm">🚩</span>
-              <div className="flex flex-col">
-                <span className="text-[9px] uppercase tracking-wider font-bouncy font-extrabold text-slate-400">
-                  DISTANCE
-                </span>
+        <header className="absolute top-0 inset-x-0 z-20 flex items-center justify-between p-3 sm:px-6 bg-gradient-to-b from-slate-950/95 via-slate-950/70 to-transparent backdrop-blur-xs">
+          {/* Left Telemetry Wing: Distance, Record & Coin Stash */}
+          <div className="flex items-center gap-2 sm:gap-4">
+            {/* Distance Telemetry */}
+            <div className="flex items-center gap-2.5 bg-slate-900/90 border border-slate-700/80 px-3.5 py-1.5 rounded-xl shadow-lg">
+              <span className="text-amber-400 font-bold text-xs tracking-wider font-mono">DIST</span>
+              <div className="flex items-baseline gap-1.5">
                 <span
                   ref={hudDistanceRef}
-                  className="font-arcade text-base font-extrabold text-white tracking-wide leading-none"
+                  className="font-arcade text-lg sm:text-xl font-extrabold text-white tracking-wide tabular-nums leading-none"
                 >
                   {Math.floor(distance)}m
                 </span>
+                {gameStats.bestDistance > 0 && (
+                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline tabular-nums">
+                    / {gameStats.bestDistance}m BEST
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Shiny Coin Stash Badge */}
-            <div className="flex items-center gap-2 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 px-3.5 py-1.5 rounded-2xl border-2 border-amber-400/50 shadow-lg shadow-amber-500/10">
-              <span className="text-base animate-bounce">🪙</span>
-              <div className="flex flex-col">
-                <span className="text-[9px] uppercase tracking-wider font-bouncy font-extrabold text-amber-300">
-                  COINS
-                </span>
-                <span
-                  ref={hudCoinsRef}
-                  className="font-arcade text-base font-extrabold text-amber-400 tracking-wide leading-none"
-                >
-                  {coins}
-                </span>
-              </div>
+            {/* Coin Stash Telemetry */}
+            <div className="flex items-center gap-2 bg-slate-900/90 border border-amber-400/40 px-3.5 py-1.5 rounded-xl shadow-lg shadow-amber-500/5">
+              <span className="text-sm">🪙</span>
+              <span
+                ref={hudCoinsRef}
+                className="font-arcade text-lg sm:text-xl font-extrabold text-amber-400 tracking-wide tabular-nums leading-none"
+              >
+                {coins}
+              </span>
             </div>
           </div>
 
-          {/* Right Arcade Action Controls */}
+          {/* Right Action Island: Tactile Arcade Controls */}
           <div className="flex items-center gap-2">
-            {/* Chunky Arcade Pause / Resume Button */}
+            {/* Pause / Resume Button */}
             {gameState === 'PLAYING' && (
               <button
                 onClick={handlePause}
-                className="arcade-btn flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-b from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-arcade font-bold text-xs tracking-wider border-2 border-amber-300 shadow-lg shadow-amber-500/20 cursor-pointer"
-                title="Pause Flight (ESC / P)"
+                className="arcade-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-arcade font-bold text-xs tracking-wider shadow-md shadow-amber-500/20 cursor-pointer"
+                title="Pause Flight (P / Esc)"
               >
-                <Pause className="w-4 h-4 fill-current" />
-                <span>PAUSE</span>
+                <Pause className="w-3.5 h-3.5 fill-current" />
+                <span className="hidden sm:inline">PAUSE</span>
+                <span className="text-[10px] font-mono opacity-75 sm:hidden">[P]</span>
               </button>
             )}
 
             {gameState === 'PAUSED' && (
               <button
                 onClick={handleResume}
-                className="arcade-btn flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-b from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 text-slate-950 font-arcade font-bold text-xs tracking-wider border-2 border-emerald-300 shadow-lg shadow-emerald-500/20 cursor-pointer"
-                title="Resume Flight (ESC / P)"
+                className="arcade-btn flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-emerald-500 hover:from-emerald-300 hover:to-emerald-400 text-slate-950 font-arcade font-bold text-xs tracking-wider shadow-md shadow-emerald-500/20 cursor-pointer"
+                title="Resume Flight (P / Esc)"
               >
-                <Play className="w-4 h-4 fill-current" />
+                <Play className="w-3.5 h-3.5 fill-current" />
                 <span>RESUME</span>
               </button>
             )}
 
-            {/* Gadget Toggles: Hitboxes */}
-            <button
-              onClick={onToggleHitboxes}
-              className={`arcade-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bouncy font-bold border-2 transition-all cursor-pointer ${
-                showHitboxes
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/60 shadow-sm'
-                  : 'bg-slate-900/90 text-slate-400 hover:text-white border-slate-700/80'
-              }`}
-              title="Toggle Hitbox Wireframes"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">HITBOXES</span>
-            </button>
-
-            {/* Audio Sound Mute */}
-            <button
-              onClick={handleToggleMute}
-              className="arcade-btn p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 cursor-pointer"
-              title={isMuted ? 'Turn Sound ON' : 'Turn Sound OFF'}
-            >
-              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-amber-400" />}
-            </button>
-
-            {/* Fullscreen Button */}
-            <button
-              onClick={handleToggleFullscreen}
-              className="arcade-btn p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 cursor-pointer"
-              title={isFullscreen ? 'Exit Fullscreen (F)' : 'Arcade Fullscreen (F)'}
-            >
-              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4 text-cyan-400" />}
-            </button>
-
-            {/* Gadget Lab (Settings) Button - Opens directly without pause overlay conflict */}
+            {/* Gadget Lab (Settings) Button */}
             <button
               onClick={() => {
                 if (gameState === 'PLAYING') handlePause();
                 onNavigateToTuningPage();
               }}
-              className="arcade-btn flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 cursor-pointer"
-              title="Gadget Lab (Physics & Flight Settings)"
+              className="arcade-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 cursor-pointer transition-colors text-xs font-semibold"
+              title="Open Gadget Lab (L)"
             >
-              <Sliders className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline text-xs font-arcade font-bold">LAB</span>
+              <Sliders className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline font-arcade font-bold">LAB</span>
+              <span className="text-[10px] font-mono text-slate-500 hidden lg:inline">[L]</span>
+            </button>
+
+            {/* Player Database & Wallet Profile Button */}
+            <button
+              onClick={() => {
+                sound.playUiClick();
+                if (gameState === 'PLAYING') handlePause();
+                setIsProfileOpen(true);
+              }}
+              className="arcade-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 cursor-pointer transition-colors text-xs font-semibold"
+              title="Player Database & Wallet Profile"
+            >
+              <User className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline font-arcade font-bold">PILOT</span>
+            </button>
+
+            {/* Hitbox Wireframe Toggle */}
+            <button
+              onClick={() => {
+                sound.playUiClick();
+                onToggleHitboxes();
+              }}
+              className={`arcade-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                showHitboxes
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/60 shadow-sm'
+                  : 'bg-slate-900/90 text-slate-400 hover:text-white border-slate-700/80'
+              }`}
+              title="Toggle Laser & Player Hitbox Wireframes (H)"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline">HITBOXES</span>
+            </button>
+
+            {/* Audio Mute Toggle */}
+            <button
+              onClick={handleToggleMute}
+              className="arcade-btn p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 cursor-pointer transition-colors"
+              title={isMuted ? 'Turn Sound ON (M)' : 'Turn Sound OFF (M)'}
+            >
+              {isMuted ? (
+                <VolumeX className="w-4 h-4 text-rose-400" />
+              ) : (
+                <Volume2 className="w-4 h-4 text-amber-400" />
+              )}
+            </button>
+
+            {/* Fullscreen Toggle */}
+            <button
+              onClick={handleToggleFullscreen}
+              className="arcade-btn p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 cursor-pointer transition-colors"
+              title={isFullscreen ? 'Exit Fullscreen (F)' : 'Arcade Fullscreen (F)'}
+            >
+              {isFullscreen ? (
+                <Minimize className="w-4 h-4" />
+              ) : (
+                <Maximize className="w-4 h-4 text-cyan-400" />
+              )}
             </button>
           </div>
-        </div>
+        </header>
       )}
 
-      {/* Screen-Filling Canvas Container (GAME ENGINE UNTOUCHED) */}
+      {/* Screen-Filling Canvas Container with Chassis Border */}
       <div
         className="w-full h-full flex items-center justify-center relative cursor-pointer overflow-hidden"
         onMouseDown={gameState === 'READY' ? handleStartGame : handleInputStart}
@@ -711,70 +829,112 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           handleInputEnd();
         }}
       >
+        {/* Main 2D Canvas */}
         <canvas
           ref={canvasRef}
           width={CANVAS_VIRTUAL_WIDTH}
           height={CANVAS_VIRTUAL_HEIGHT}
-          className="w-full h-full object-contain block max-w-full max-h-full"
+          className="w-full h-full object-contain block max-w-full max-h-full drop-shadow-[0_0_50px_rgba(0,0,0,0.8)]"
         />
 
-        {/* VERY FIRST PAGE: HIGH-RES POSTER BACKGROUND & "PRESS ANY BUTTON TO START" */}
+        {/* 1. SPECTACULAR TITLE / READY SCREEN */}
         {gameState === 'READY' && (
           <div
-            className="absolute inset-0 z-30 flex flex-col justify-end items-center cursor-pointer select-none overflow-hidden animate-in fade-in duration-300"
+            className="absolute inset-0 z-30 flex flex-col justify-between cursor-pointer select-none overflow-hidden animate-in fade-in duration-300 p-4 sm:p-8"
             onClick={handleStartGame}
           >
-            {/* Poster Image Background */}
+            {/* High-Resolution Poster Background */}
             <img
               src="/Jetpack_Chogride_game_poster_2K_20261018130503.jpg"
               alt="Jetpack Chogride Poster"
               className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
             />
 
-            {/* Title Screen Top Bar: Quick Sound & Fullscreen Controls */}
-            <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+            {/* Subtle gentle dim veil (15%) for balanced contrast */}
+            <div className="absolute inset-0 bg-slate-950/15 pointer-events-none" />
+
+            {/* Subtle soft bottom gradient strictly behind the button for clean button legibility */}
+            <div className="absolute inset-x-0 bottom-0 h-44 bg-gradient-to-t from-black/60 via-black/20 to-transparent pointer-events-none" />
+
+            {/* Title Screen Top Bar: Quick Audio, Record & Fullscreen controls */}
+            <div className="relative z-40 flex items-center justify-end gap-2 sm:gap-3">
+              {gameStats.bestDistance > 0 && (
+                <div className="hidden sm:flex items-center gap-2 bg-slate-900/90 border border-amber-400/40 px-3.5 py-1.5 rounded-xl shadow-lg">
+                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-xs font-semibold text-slate-300 font-mono">
+                    RECORD: <span className="text-amber-400 font-arcade text-sm font-bold">{gameStats.bestDistance}m</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Pilot / Wallet Profile */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  sound.playUiClick();
+                  setIsProfileOpen(true);
+                }}
+                className="arcade-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 shadow-lg text-xs font-semibold cursor-pointer"
+                title="Player Database & Wallet Profile"
+              >
+                <User className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">PILOT PROFILE</span>
+              </button>
+
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   handleToggleMute();
                 }}
-                className="arcade-btn flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border-2 border-slate-700/80 shadow-lg cursor-pointer backdrop-blur-xs font-arcade text-xs tracking-wider"
-                title={isMuted ? 'Turn Sound ON (M)' : 'Turn Sound OFF (M)'}
+                className="arcade-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 shadow-lg text-xs font-semibold cursor-pointer"
+                title={isMuted ? 'Turn Sound ON' : 'Turn Sound OFF'}
               >
-                {isMuted ? (
-                  <>
-                    <VolumeX className="w-4 h-4 text-rose-400" />
-                    <span className="font-bold text-rose-400">SOUND: MUTED</span>
-                  </>
-                ) : (
-                  <>
-                    <Volume2 className="w-4 h-4 text-amber-400 animate-pulse" />
-                    <span className="font-bold text-amber-300">SOUND: ON</span>
-                  </>
-                )}
+                {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-amber-400" />}
+                <span className="hidden sm:inline">{isMuted ? 'MUTED' : 'AUDIO ON'}</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleFullscreen();
+                }}
+                className="arcade-btn p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 shadow-lg cursor-pointer"
+                title="Toggle Fullscreen"
+              >
+                {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4 text-cyan-400" />}
               </button>
             </div>
 
-            {/* Subtle atmospheric vignette gradient at bottom for maximum legibility */}
-            <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/85 via-black/30 to-transparent pointer-events-none" />
+            {/* Title Screen Bottom Stage: Launch CTA */}
+            <div className="relative z-40 max-w-4xl mx-auto w-full flex flex-col items-center text-center mb-8 sm:mb-12">
+              {/* Massive High-Impact Launch Button */}
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={handleStartGame}
+                  className="arcade-btn group px-10 py-4 sm:px-16 sm:py-5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-arcade font-black text-xl sm:text-2xl md:text-3xl tracking-wider shadow-[0_0_50px_rgba(245,158,11,0.6)] cursor-pointer transform hover:scale-105 active:scale-95 transition-all flex items-center gap-4"
+                >
+                  <Play className="w-7 h-7 sm:w-9 sm:h-9 fill-current" />
+                  <span>LAUNCH CHOG!</span>
+                  <ArrowRight className="w-6 h-6 sm:w-8 sm:h-8 group-hover:translate-x-1 transition-transform" />
+                </button>
 
-            {/* Bottom Call-To-Action: "PRESS ANY BUTTON TO START" */}
-            <div className="relative z-40 mb-12 sm:mb-16 flex flex-col items-center text-center px-4">
-              <button
-                onClick={handleStartGame}
-                className="arcade-btn group px-8 py-4 sm:px-14 sm:py-5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-arcade font-black text-lg sm:text-2xl md:text-3xl tracking-widest border-3 border-amber-200 shadow-[0_0_40px_rgba(245,158,11,0.7)] cursor-pointer transform hover:scale-105 active:scale-95 transition-all duration-150 animate-pulse flex items-center gap-3.5"
-              >
-                <Play className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
-                <span>PRESS ANY BUTTON TO START</span>
-              </button>
+                {/* Keyboard Quick Guide */}
+                <div className="flex items-center gap-3 text-xs text-slate-400 font-mono pt-1">
+                  <span>PRESS <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">SPACE</kbd> OR CLICK TO BEGIN</span>
+                  <span>·</span>
+                  <span><kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">P</kbd> PAUSE</span>
+                  <span>·</span>
+                  <span><kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">L</kbd> LAB</span>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* MINIMAL ARCADE PAUSE OVERLAY */}
+        {/* 2. IN-FLIGHT MISSION PAUSE TERMINAL */}
         {gameState === 'PAUSED' && (
           <div
-            className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 z-30 animate-in fade-in duration-150 select-none"
+            className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-6 z-30 animate-in fade-in duration-150 select-none"
             onClick={(e) => {
               e.stopPropagation();
               handleResume();
@@ -782,103 +942,221 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div
-              className="flex flex-col items-center gap-4 text-center"
+              className="max-w-md w-full rounded-2xl bg-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl space-y-6 text-center"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Header */}
+              <div className="space-y-1">
+                <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-semibold">
+                  STATUS REPORT
+                </span>
+                <h2 className="text-2xl sm:text-3xl font-extrabold font-arcade text-white tracking-wide">
+                  FLIGHT PAUSED
+                </h2>
+              </div>
 
-              <button
-                onClick={handleResume}
-                className="arcade-btn flex items-center justify-center gap-3 px-10 py-4 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-arcade font-extrabold text-xl tracking-wider border-2 border-amber-200 shadow-2xl shadow-amber-500/30 hover:scale-105 active:scale-95 transition-transform cursor-pointer"
-                title="Resume Flight"
-                autoFocus
-              >
-                <Play className="w-6 h-6 fill-current" />
-                <span>RESUME</span>
-              </button>
+              {/* In-Flight Run Debrief Stats */}
+              <div className="grid grid-cols-2 gap-3 p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-left">
+                <div>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400 block">
+                    CURRENT DISTANCE
+                  </span>
+                  <span className="text-2xl font-bold font-arcade text-white tabular-nums">
+                    {Math.floor(distance)}m
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400 block">
+                    COINS COLLECTED
+                  </span>
+                  <span className="text-2xl font-bold font-arcade text-amber-400 tabular-nums">
+                    {coins}
+                  </span>
+                </div>
+              </div>
 
-              <div className="flex items-center gap-3 text-xs font-bouncy text-slate-400 pt-1">
+              {/* Action Buttons */}
+              <div className="space-y-2.5">
+                <button
+                  onClick={handleResume}
+                  className="arcade-btn w-full flex items-center justify-center gap-3 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-arcade font-extrabold text-base tracking-wider shadow-lg shadow-amber-500/20 cursor-pointer"
+                  autoFocus
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  <span>RESUME FLIGHT [P / ESC]</span>
+                </button>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    onClick={handleRestart}
+                    className="arcade-btn flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-4 h-4 text-amber-400" />
+                    <span>Restart Run [R]</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      sound.playUiClick();
+                      onNavigateToTuningPage();
+                    }}
+                    className="arcade-btn flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Sliders className="w-4 h-4 text-cyan-400" />
+                    <span>Gadget Lab [L]</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Keyboard Shortcut Summary */}
+              <div className="text-[11px] text-slate-500 font-mono pt-1">
+                Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">ESC</kbd> or <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">P</kbd> to return instantly
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 3. EXHILARATING FLIGHT DEBRIEF & RECORD SCREEN (Game Over) */}
+        {gameState === 'GAME_OVER' && (
+          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-4 sm:p-6 z-30 animate-in fade-in duration-200">
+            <div className="max-w-lg w-full rounded-2xl bg-slate-900 border border-slate-800 p-6 sm:p-8 shadow-2xl space-y-6 text-center">
+              {/* Record Banner / Header */}
+              {isNewRecord ? (
+                <div className="p-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/30 to-amber-500/20 border border-amber-400/60 space-y-1">
+                  <div className="flex items-center justify-center gap-2 text-amber-400 font-arcade text-sm font-bold tracking-wider">
+                    <Sparkles className="w-4 h-4" />
+                    <span>NEW ALL-TIME RECORD!</span>
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div className="text-3xl font-arcade font-black text-white">
+                    {Math.floor(distance)} METERS
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <span className="text-xs font-mono uppercase tracking-widest text-rose-400 font-semibold">
+                    FLIGHT TERMINATED
+                  </span>
+                  <h2 className="text-3xl sm:text-4xl font-extrabold font-arcade text-white tracking-wide">
+                    WIPEOUT!
+                  </h2>
+                </div>
+              )}
+
+              {/* Cause of Death Tactical Callout */}
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-center gap-2.5 text-xs text-slate-300">
+                {deathType === 'laser' ? (
+                  <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{causeOfDeath}</span>
+              </div>
+
+              {/* Sortie Performance Grid */}
+              <div className="grid grid-cols-3 gap-2.5 p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-left">
+                <div>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400 block">
+                    DISTANCE
+                  </span>
+                  <span className="text-xl sm:text-2xl font-bold font-arcade text-white tabular-nums">
+                    {Math.floor(distance)}m
+                  </span>
+                  <span className="text-[10px] text-slate-500 block truncate font-mono">
+                    Best: {gameStats.bestDistance}m
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400 block">
+                    COINS
+                  </span>
+                  <span className="text-xl sm:text-2xl font-bold font-arcade text-amber-400 tabular-nums">
+                    +{coins}
+                  </span>
+                  <span className="text-[10px] text-slate-500 block truncate font-mono">
+                    Vault: {gameStats.totalCoins}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400 block">
+                    RANK
+                  </span>
+                  <span className={`text-sm sm:text-base font-bold font-arcade ${pilotRank.color} block truncate leading-tight mt-1`}>
+                    {pilotRank.title}
+                  </span>
+                  <span className="text-[10px] text-slate-500 block font-mono">
+                    Sortie #{gameStats.totalRuns}
+                  </span>
+                </div>
+              </div>
+
+              {/* Tactile Action Buttons */}
+              <div className="space-y-2.5">
                 <button
                   onClick={handleRestart}
-                  className="hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer py-1 px-2.5 rounded-lg hover:bg-slate-900 border border-transparent hover:border-slate-800"
+                  className="arcade-btn w-full flex items-center justify-center gap-3 py-4 rounded-xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-arcade font-black text-lg tracking-wider shadow-lg shadow-amber-500/30 cursor-pointer"
+                  autoFocus
                 >
-                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Restart Run [R]</span>
+                  <RotateCcw className="w-5 h-5 stroke-[2.5]" />
+                  <span>FLY AGAIN! [SPACE / R]</span>
                 </button>
-                <span className="text-slate-600">·</span>
-                <span className="text-slate-500">Press ESC to resume</span>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => {
+                      sound.playUiClick();
+                      onNavigateToTuningPage();
+                    }}
+                    className="arcade-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Lab [L]</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      sound.playUiClick();
+                      setIsProfileOpen(true);
+                    }}
+                    className="arcade-btn flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Wallet</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      sound.playUiClick();
+                      isFiringRef.current = false;
+                      sound.stopJetpack();
+                      const e = engineRef.current;
+                      e.playerY = PLAYABLE_BOTTOM - 52;
+                      e.playerVy = 0;
+                      e.isGrounded = true;
+                      e.movementState = 'RUNNING';
+                      e.justStarted = true;
+                      setGameState('READY');
+                    }}
+                    className="arcade-btn py-2.5 rounded-xl bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Title
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* FUN ARCADE GAME OVER / WIPEOUT OVERLAY */}
-        {gameState === 'GAME_OVER' && (
-          <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 animate-in fade-in duration-200 z-30">
-            <h2 className="text-4xl font-extrabold font-arcade text-white tracking-wide mb-6 drop-shadow-md">
-              WIPEOUT!
-            </h2>
-
-            {/* Flight Report Badges */}
-            <div className="flex items-center gap-6 mb-8 p-4 px-8 rounded-3xl bg-slate-900 border-2 border-slate-800 shadow-2xl">
-              <div className="text-center">
-                <span className="text-slate-400 block text-xs uppercase tracking-wider font-bouncy font-bold">
-                  DISTANCE FLOWN
-                </span>
-                <span className="text-3xl font-extrabold font-arcade text-white tracking-wide">
-                  {Math.floor(distance)}m
-                </span>
-              </div>
-              <div className="h-10 w-0.5 bg-slate-800" />
-              <div className="text-center">
-                <span className="text-slate-400 block text-xs uppercase tracking-wider font-bouncy font-bold">
-                  COINS STASHED
-                </span>
-                <span className="text-3xl font-extrabold font-arcade text-amber-400 tracking-wide">
-                  {coins}
-                </span>
-              </div>
-            </div>
-
-            {/* Try Again & Title Screen Buttons */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleRestart}
-                className="arcade-btn flex items-center gap-2.5 px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-arcade font-extrabold text-sm tracking-wider border-2 border-amber-200 shadow-xl shadow-amber-500/30 cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4 stroke-[3]" />
-                <span>FLY AGAIN! [R]</span>
-              </button>
-              <button
-                onClick={() => {
-                  isFiringRef.current = false;
-                  sound.stopJetpack();
-                  const e = engineRef.current;
-                  e.playerY = PLAYABLE_BOTTOM - 52;
-                  e.playerVy = 0;
-                  e.isGrounded = true;
-                  e.movementState = 'RUNNING';
-                  e.justStarted = true;
-                  setGameState('READY');
-                }}
-                className="arcade-btn px-6 py-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white font-arcade font-bold text-xs tracking-wider border-2 border-slate-700/80 cursor-pointer transition-colors"
-              >
-                TITLE SCREEN
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom Playful Flight Reminder */}
-        {gameState === 'PLAYING' && (
-          <div className="absolute bottom-4 right-6 pointer-events-none flex items-center gap-2.5 text-xs font-bouncy font-bold text-white bg-slate-900/90 px-4 py-2 rounded-2xl border-2 border-slate-700/80 shadow-lg backdrop-blur-xs">
-            <span
-              ref={flightDotRef}
-              className="w-2.5 h-2.5 rounded-full bg-slate-500"
-            />
-            <span ref={flightTextRef}>TAP / HOLD SPACE TO FLY · [P] PAUSE</span>
-          </div>
-        )}
       </div>
+
+      {/* Player Database & Wallet Profile Modal */}
+      <PlayerProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        currentLifetimeCoins={gameStats.totalCoins}
+      />
     </div>
   );
 };
